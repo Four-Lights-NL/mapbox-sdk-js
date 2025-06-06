@@ -1794,10 +1794,10 @@ to understand all of the available options.
 
 *   `config` **[Object][207]**&#x20;
 
-    *   `config.profile` **(`"driving-traffic"` | `"driving"` | `"walking"` | `"cycling"`)**  (optional, default `"driving"`)
+    *   `config.profile` **(`"mapbox/driving-traffic"` | `"mapbox/driving"` | `"mapbox/walking"` | `"mapbox/cycling"`)**  (optional, default `"mapbox/driving"`)
     *   `config.waypoints` **[Array][216]<[DirectionsWaypoint][174]>** An ordered array of [`DirectionsWaypoint`][174] objects, between 2 and 25 (inclusive).
     *   `config.alternatives` **[boolean][209]** Whether to try to return alternative routes. (optional, default `false`)
-    *   `config.annotations` **[Array][216]<(`"duration"` | `"distance"` | `"speed"` | `"congestion"`)>?** Specify additional metadata that should be returned.
+    *   `config.annotations` **[Array][216]<(`"duration"` | `"distance"` | `"speed"` | `"congestion"` | `"congestion_numeric"` | `"maxspeed"` | `"closure"` | `"state_of_charge"`)>?** Specify additional metadata that should be returned.
     *   `config.bannerInstructions` **[boolean][209]** Should be used in conjunction with `steps`. (optional, default `false`)
     *   `config.continueStraight` **[boolean][209]?** Sets the allowed direction of travel when departing intermediate waypoints.
     *   `config.exclude` **[string][208]?** Exclude certain road types from routing. See HTTP service documentation for options.
@@ -1812,7 +1812,7 @@ to understand all of the available options.
     *   `config.engine` **(`"electric_no_recharge"` | `"electric"`)** Set to electric to enable electric vehicle routing. (optional, default `"electric_no_recharge"`)
     *   `config.ev_initial_charge` **[number][212]?** Optional parameter to specify initial charge of vehicle in Wh (watt-hours) at the beginning of the route.
     *   `config.ev_max_charge` **[number][212]?** Required parameter that defines the maximum possible charge of vehicle in Wh (watt-hours).
-    *   `config.ev_connector_types` **(`"ccs_combo_type1"` | `"ccs_combo_type1"` | `"tesla"`)?** Required parameter that defines the compatible connector-types for the vehicle.
+    *   `config.ev_connector_types` **(`"ccs_combo_type1"` | `"ccs_combo_type2"` | `"tesla"`)?** Required parameter that defines the compatible connector-types for the vehicle.
     *   `config.energy_consumption_curve` **[String][208]?** Required parameter that specifies in pairs the energy consumption in watt-hours per kilometer at a certain speed in kph.
     *   `config.ev_charging_curve` **[String][208]?** Required parameter that specifies the maximum battery charging rate (W) at a given charge level (Wh) in a list of pairs.
     *   `config.ev_unconditioned_charging_curve` **[String][208]?** Optional parameter that specifies the maximum battery charging rate (W) at a given charge level (Wh) in a list of pairs when the battery is in an unconditioned state (eg: cold).
@@ -1870,19 +1870,22 @@ Snap recorded location traces to roads and paths.
 
 *   `config` **[Object][207]**&#x20;
 
-    *   `config.points` **[Array][216]<[MapMatchingPoint][176]>** An ordered array of [`MapMatchingPoint`][176]s, between 2 and 100 (inclusive).
-    *   `config.profile` **(`"driving-traffic"` | `"driving"` | `"walking"` | `"cycling"`)** A directions profile ID. (optional, default `driving`)
-    *   `config.annotations` **[Array][216]<(`"duration"` | `"distance"` | `"speed"`)>?** Specify additional metadata that should be returned.
+    *   `config.points` **([Array][216]<[MapMatchingPoint][176]> | [string][208])** An ordered array of [`MapMatchingPoint`][176]s, between 2 and 100 (inclusive), or an OpenLR encoded string.
+    *   `config.profile` **(`"mapbox/driving-traffic"` | `"mapbox/driving"` | `"mapbox/walking"` | `"mapbox/cycling"`)** A directions profile ID. (optional, default `"mapbox/driving"`)
+    *   `config.annotations` **[Array][216]<(`"duration"` | `"distance"` | `"speed"` | `"congestion"` | `"congestion_numeric"` | `"maxspeed"`)>?** Specify additional metadata that should be returned.
     *   `config.geometries` **(`"geojson"` | `"polyline"` | `"polyline6"`)** Format of the returned geometry. (optional, default `"polyline"`)
     *   `config.language` **[string][208]** Language of returned turn-by-turn text instructions.
         See [supported languages][247]. (optional, default `"en"`)
     *   `config.overview` **(`"simplified"` | `"full"` | `"false"`)** Type of returned overview geometry. (optional, default `"simplified"`)
     *   `config.steps` **[boolean][209]** Whether to return steps and turn-by-turn instructions. (optional, default `false`)
     *   `config.tidy` **[boolean][209]** Whether or not to transparently remove clusters and re-sample traces for improved map matching results. (optional, default `false`)
+    *   `config.openLR_spec` **(`"tomtom"` | `"here"`)?** OpenLR specification version. Required when using OpenLR encoded strings.
+    *   `config.openLR_format` **(`"xml"` | `"binary"`)?** OpenLR format. Required when using OpenLR encoded strings.
 
 #### Examples
 
 ```javascript
+// Using coordinate points
 mapMatchingClient.getMatch({
   points: [
     {
@@ -1912,6 +1915,20 @@ mapMatchingClient.getMatch({
     }
   ],
   tidy: false,
+})
+  .send()
+  .then(response => {
+    const matching = response.body;
+  })
+```
+
+```javascript
+// Using OpenLR encoded string
+mapMatchingClient.getMatch({
+  points: "CwRbWyNG9RpsCQDzAQA=",
+  openLR_spec: "tomtom",
+  openLR_format: "binary",
+  profile: "mapbox/driving"
 })
   .send()
   .then(response => {
