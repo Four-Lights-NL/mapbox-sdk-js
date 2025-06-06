@@ -20,10 +20,10 @@ var Directions = {};
  * to understand all of the available options.
  *
  * @param {Object} config
- * @param {'driving-traffic'|'driving'|'walking'|'cycling'} [config.profile="driving"]
+ * @param {'mapbox/driving-traffic'|'mapbox/driving'|'mapbox/walking'|'mapbox/cycling'} [config.profile="mapbox/driving"]
  * @param {Array<DirectionsWaypoint>} config.waypoints - An ordered array of [`DirectionsWaypoint`](#directionswaypoint) objects, between 2 and 25 (inclusive).
  * @param {boolean} [config.alternatives=false] - Whether to try to return alternative routes.
- * @param {Array<'duration'|'distance'|'speed'|'congestion'>} [config.annotations] - Specify additional metadata that should be returned.
+ * @param {Array<'duration'|'distance'|'speed'|'congestion'|'congestion_numeric'|'maxspeed'|'closure'|'state_of_charge'>} [config.annotations] - Specify additional metadata that should be returned.
  * @param {boolean} [config.bannerInstructions=false] - Should be used in conjunction with `steps`.
  * @param {boolean} [config.continueStraight] - Sets the allowed direction of travel when departing intermediate waypoints.
  * @param {string} [config.exclude] - Exclude certain road types from routing. See HTTP service documentation for options.
@@ -38,7 +38,7 @@ var Directions = {};
  * @param {'electric_no_recharge'|'electric'} [config.engine="electric_no_recharge"] - Set to electric to enable electric vehicle routing.
  * @param {number} [config.ev_initial_charge] - Optional parameter to specify initial charge of vehicle in Wh (watt-hours) at the beginning of the route.
  * @param {number} [config.ev_max_charge] - Required parameter that defines the maximum possible charge of vehicle in Wh (watt-hours).
- * @param {'ccs_combo_type1'|'ccs_combo_type1'|'tesla'} [config.ev_connector_types] - Required parameter that defines the compatible connector-types for the vehicle.
+ * @param {'ccs_combo_type1'|'ccs_combo_type2'|'tesla'} [config.ev_connector_types] - Required parameter that defines the compatible connector-types for the vehicle.
  * @param {String} [config.energy_consumption_curve] - Required parameter that specifies in pairs the energy consumption in watt-hours per kilometer at a certain speed in kph.
  * @param {String} [config.ev_charging_curve] - Required parameter that specifies the maximum battery charging rate (W) at a given charge level (Wh) in a list of pairs.
  * @param {String} [config.ev_unconditioned_charging_curve] - Optional parameter that specifies the maximum battery charging rate (W) at a given charge level (Wh) in a list of pairs when the battery is in an unconditioned state (eg: cold).
@@ -79,7 +79,16 @@ var Directions = {};
  */
 Directions.getDirections = function(config) {
   v.assertShape({
-    profile: v.oneOf('driving-traffic', 'driving', 'walking', 'cycling'),
+    profile: v.oneOf(
+      'driving-traffic',
+      'driving',
+      'walking',
+      'cycling',
+      'mapbox/driving-traffic',
+      'mapbox/driving',
+      'mapbox/walking',
+      'mapbox/cycling'
+    ),
     waypoints: v.required(
       v.arrayOf(
         v.shape({
@@ -107,17 +116,17 @@ Directions.getDirections = function(config) {
     bannerInstructions: v.boolean,
     continueStraight: v.boolean,
     exclude: v.string,
-    geometries: v.string,
+    geometries: v.oneOf('geojson', 'polyline', 'polyline6'),
     language: v.string,
-    overview: v.string,
+    overview: v.oneOf('full', 'simplified', 'false'),
     roundaboutExits: v.boolean,
     steps: v.boolean,
     voiceInstructions: v.boolean,
-    voiceUnits: v.string,
-    engine: v.string,
+    voiceUnits: v.oneOf('imperial', 'metric'),
+    engine: v.oneOf('electric_no_recharge', 'electric'),
     ev_initial_charge: v.number,
     ev_max_charge: v.number,
-    ev_connector_types: v.string,
+    ev_connector_types: v.oneOf('ccs_combo_type1', 'ccs_combo_type2', 'tesla'),
     energy_consumption_curve: v.string,
     ev_charging_curve: v.string,
     ev_unconditioned_charging_curve: v.string,
@@ -135,6 +144,11 @@ Directions.getDirections = function(config) {
   })(config);
 
   config.profile = config.profile || 'driving';
+
+  // Normalize profile to include mapbox/ prefix if not present
+  if (!config.profile.startsWith('mapbox/')) {
+    config.profile = 'mapbox/' + config.profile;
+  }
 
   var path = {
     coordinates: [],
@@ -236,7 +250,7 @@ Directions.getDirections = function(config) {
     method: 'GET',
     path: '/directions/v5/mapbox/:profile/:coordinates',
     params: {
-      profile: config.profile,
+      profile: config.profile.replace('mapbox/', ''),
       coordinates: path.coordinates.join(';')
     },
     query: objectClean(query)
