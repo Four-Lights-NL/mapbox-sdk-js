@@ -18,18 +18,21 @@ var MapMatching = {};
  * Snap recorded location traces to roads and paths.
  *
  * @param {Object} config
- * @param {Array<MapMatchingPoint>} config.points - An ordered array of [`MapMatchingPoint`](#mapmatchingpoint)s, between 2 and 100 (inclusive).
- * @param {'driving-traffic'|'driving'|'walking'|'cycling'} [config.profile=driving] - A directions profile ID.
- * @param {Array<'duration'|'distance'|'speed'>} [config.annotations] - Specify additional metadata that should be returned.
+ * @param {Array<MapMatchingPoint>|string} config.points - An ordered array of [`MapMatchingPoint`](#mapmatchingpoint)s, between 2 and 100 (inclusive), or an OpenLR encoded string.
+ * @param {'mapbox/driving-traffic'|'mapbox/driving'|'mapbox/walking'|'mapbox/cycling'} [config.profile="mapbox/driving"] - A directions profile ID.
+ * @param {Array<'duration'|'distance'|'speed'|'congestion'|'congestion_numeric'|'maxspeed'>} [config.annotations] - Specify additional metadata that should be returned.
  * @param {'geojson'|'polyline'|'polyline6'} [config.geometries="polyline"] - Format of the returned geometry.
  * @param {string} [config.language="en"] - Language of returned turn-by-turn text instructions.
  *   See [supported languages](https://docs.mapbox.com/api/navigation/#instructions-languages).
  * @param {'simplified'|'full'|'false'} [config.overview="simplified"] - Type of returned overview geometry.
  * @param {boolean} [config.steps=false] - Whether to return steps and turn-by-turn instructions.
  * @param {boolean} [config.tidy=false] - Whether or not to transparently remove clusters and re-sample traces for improved map matching results.
+ * @param {'tomtom'|'here'} [config.openLR_spec] - OpenLR specification version. Required when using OpenLR encoded strings.
+ * @param {'xml'|'binary'} [config.openLR_format] - OpenLR format. Required when using OpenLR encoded strings.
  * @return {MapiRequest}
  *
  * @example
+ * // Using coordinate points
  * mapMatchingClient.getMatch({
  *   points: [
  *     {
@@ -64,36 +67,116 @@ var MapMatching = {};
  *   .then(response => {
  *     const matching = response.body;
  *   })
+ *
+ * @example
+ * // Using OpenLR encoded string
+ * mapMatchingClient.getMatch({
+ *   points: "CwRbWyNG9RpsCQDzAQA=",
+ *   openLR_spec: "tomtom",
+ *   openLR_format: "binary",
+ *   profile: "mapbox/driving"
+ * })
+ *   .send()
+ *   .then(response => {
+ *     const matching = response.body;
+ *   })
  */
 MapMatching.getMatch = function(config) {
   v.assertShape({
     points: v.required(
-      v.arrayOf(
-        v.shape({
-          coordinates: v.required(v.coordinates),
-          approach: v.oneOf('unrestricted', 'curb'),
-          radius: v.range([0, 50]),
-          isWaypoint: v.boolean,
-          waypointName: v.string,
-          timestamp: v.date
-        })
+      v.oneOfType(
+        v.arrayOf(
+          v.shape({
+            coordinates: v.required(v.coordinates),
+            approach: v.oneOf('unrestricted', 'curb'),
+            radius: v.range([0, 50]),
+            isWaypoint: v.boolean,
+            waypointName: v.string,
+            timestamp: v.date
+          })
+        ),
+        v.string // OpenLR encoded string
       )
     ),
-    profile: v.oneOf('driving-traffic', 'driving', 'walking', 'cycling'),
-    annotations: v.arrayOf(v.oneOf('duration', 'distance', 'speed')),
+    profile: v.oneOf(
+      'driving-traffic',
+      'driving',
+      'walking',
+      'cycling',
+      'mapbox/driving-traffic',
+      'mapbox/driving',
+      'mapbox/walking',
+      'mapbox/cycling'
+    ),
+    annotations: v.arrayOf(
+      v.oneOf(
+        'duration',
+        'distance',
+        'speed',
+        'congestion',
+        'congestion_numeric',
+        'maxspeed'
+      )
+    ),
     geometries: v.oneOf('geojson', 'polyline', 'polyline6'),
     language: v.string,
     overview: v.oneOf('full', 'simplified', 'false'),
     steps: v.boolean,
-    tidy: v.boolean
+    tidy: v.boolean,
+    openLR_spec: v.oneOf('tomtom', 'here'),
+    openLR_format: v.oneOf('xml', 'binary')
   })(config);
 
+  // Handle OpenLR encoded strings
+  if (typeof config.points === 'string') {
+    // OpenLR validation
+    if (!config.openLR_spec || !config.openLR_format) {
+      throw new Error(
+        'openLR_spec and openLR_format are required when using OpenLR encoded strings'
+      );
+    }
+
+    config.profile = config.profile || 'driving';
+
+    // Normalize profile to include mapbox/ prefix if not present
+    if (!config.profile.startsWith('mapbox/')) {
+      config.profile = 'mapbox/' + config.profile;
+    }
+
+    var openLRBody = stringifyBooleans(
+      objectClean({
+        annotations: config.annotations,
+        geometries: config.geometries,
+        language: config.language,
+        overview: config.overview,
+        steps: config.steps,
+        tidy: config.tidy,
+        openLR_spec: config.openLR_spec,
+        openLR_format: config.openLR_format,
+        coordinates: config.points
+      })
+    );
+
+    return this.client.createRequest({
+      method: 'POST',
+      path: '/matching/v5/mapbox/:profile',
+      params: {
+        profile: config.profile.replace('mapbox/', '')
+      },
+      body: urlUtils.appendQueryObject('', openLRBody).substring(1),
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded'
+      }
+    });
+  }
+
+  // Handle coordinate arrays
   var pointCount = config.points.length;
   if (pointCount < 2 || pointCount > 100) {
     throw new Error('points must include between 2 and 100 MapMatchingPoints');
   }
 
-  config.profile = config.profile || 'driving';
+  config.profile = config.profile || 'mapbox/driving';
 
   var path = {
     coordinates: [],
@@ -198,7 +281,7 @@ MapMatching.getMatch = function(config) {
     method: 'POST',
     path: '/matching/v5/mapbox/:profile',
     params: {
-      profile: config.profile
+      profile: config.profile.replace('mapbox/', '')
     },
     body: urlUtils.appendQueryObject('', body).substring(1), // need to remove the char`?`
     headers: {
