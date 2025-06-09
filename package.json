@@ -3,6 +3,7 @@
   "version": "0.16.1",
   "description": "JS SDK for accessing Mapbox APIs",
   "main": "index.js",
+  "types": "index.d.ts",
   "files": [
     "umd",
     "lib",

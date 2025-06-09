@@ -20,14 +20,24 @@ var MapMatching = {};
  * @param {Object} config
  * @param {Array<MapMatchingPoint>} config.points - An ordered array of [`MapMatchingPoint`](#mapmatchingpoint)s, between 2 and 100 (inclusive).
  * @param {'driving-traffic'|'driving'|'walking'|'cycling'} [config.profile=driving] - A directions profile ID.
- * @param {Array<'duration'|'distance'|'speed'>} [config.annotations] - Specify additional metadata that should be returned.
+ * @param {Array<'duration'|'distance'|'speed'|'congestion'|'congestion_numeric'|'maxspeed'>} [config.annotations] - Specify additional metadata that should be returned.
  * @param {'geojson'|'polyline'|'polyline6'} [config.geometries="polyline"] - Format of the returned geometry.
  * @param {string} [config.language="en"] - Language of returned turn-by-turn text instructions.
  *   See [supported languages](https://docs.mapbox.com/api/navigation/#instructions-languages).
  * @param {'simplified'|'full'|'false'} [config.overview="simplified"] - Type of returned overview geometry.
  * @param {boolean} [config.steps=false] - Whether to return steps and turn-by-turn instructions.
+ * @param {boolean} [config.banner_instructions=false] - Whether to return banner objects associated with the route steps. Must be used in conjunction with `steps=true`.
+ * @param {boolean} [config.roundabout_exits=false] - Whether to emit instructions at roundabout exits. Must be used in conjunction with `steps=true`.
+ * @param {boolean} [config.voice_instructions=false] - Whether to return SSML marked-up text for voice guidance along the route. Must be used in conjunction with `steps=true`.
+ * @param {'imperial'|'british_imperial'|'metric'} [config.voice_units="imperial"] - Specify which type of units to return in the text for voice instructions. Must be used in conjunction with `steps=true` and `voice_instructions=true`.
  * @param {boolean} [config.tidy=false] - Whether or not to transparently remove clusters and re-sample traces for improved map matching results.
- * @return {MapiRequest}
+ * @param {Array<number>} [config.timestamps] - A semicolon-separated list of numbers in Unix time (in other words, seconds since 1/1/1970 UTC) that correspond to each input coordinate.
+ * @param {string} [config.waypoint_names] - A semicolon-separated list of custom names for waypoints.
+ * @param {string} [config.waypoints] - A semicolon-separated list indicating which input coordinates should be treated as waypoints.
+ * @param {Array<'access'|'oneways'|'restrictions'>} [config.ignore] - Ignore certain routing restrictions when map matching.
+ * @param {string} [config.depart_at] - The departure time from the first coordinates, formatted in ISO 8601.
+ * @param {boolean} [config.linear_references=false] - Whether to return base64-encoded OpenLR location references.
+ * @return {MapiRequest<{matchings: Array<MatchObject>, tracepoints: Array<TracepointObject>}>}
  *
  * @example
  * mapMatchingClient.getMatch({
@@ -80,12 +90,31 @@ MapMatching.getMatch = function(config) {
       )
     ),
     profile: v.oneOf('driving-traffic', 'driving', 'walking', 'cycling'),
-    annotations: v.arrayOf(v.oneOf('duration', 'distance', 'speed')),
+    annotations: v.arrayOf(
+      v.oneOf(
+        'duration',
+        'distance',
+        'speed',
+        'congestion',
+        'congestion_numeric',
+        'maxspeed'
+      )
+    ),
     geometries: v.oneOf('geojson', 'polyline', 'polyline6'),
     language: v.string,
     overview: v.oneOf('full', 'simplified', 'false'),
     steps: v.boolean,
-    tidy: v.boolean
+    banner_instructions: v.boolean,
+    roundabout_exits: v.boolean,
+    voice_instructions: v.boolean,
+    voice_units: v.oneOf('imperial', 'british_imperial', 'metric'),
+    tidy: v.boolean,
+    timestamps: v.arrayOf(v.number),
+    waypoint_names: v.string,
+    waypoints: v.string,
+    ignore: v.arrayOf(v.oneOf('access', 'oneways', 'restrictions')),
+    depart_at: v.string,
+    linear_references: v.boolean
   })(config);
 
   var pointCount = config.points.length;
@@ -112,6 +141,32 @@ MapMatching.getMatch = function(config) {
    * @property {boolean} [isWaypoint=true] - Whether this coordinate is waypoint or not. The first and last coordinates will always be waypoints.
    * @property {string} [waypointName] - Custom name for the waypoint used for the arrival instruction in banners and voice instructions. Will be ignored unless `isWaypoint` is `true`.
    * @property {string | number | Date} [timestamp] - Datetime corresponding to the coordinate.
+   */
+
+  /**
+   * A match object is a route object with an additional confidence field.
+   *
+   * @typedef {Object} MatchObject
+   * @property {number} confidence - The level of confidence in the returned match, from 0 (low) to 1 (high).
+   * @property {number} distance - The distance traveled, in meters.
+   * @property {number} duration - The estimated travel time, in seconds.
+   * @property {number} weight - The weight in units described by weight_name.
+   * @property {string} weight_name - The weight used. The default is routability, which is duration-based, with additional penalties for less desirable maneuvers.
+   * @property {Feature<LineString>|Feature<MultiLineString>|string} geometry - Depending on the geometries parameter in the request, this is a GeoJSON LineString or a Polyline string. Depending on the overview parameter in the request, this is the complete route geometry (full), a simplified geometry to the zoom level at which the route can be displayed in full (simplified), or is not included (false).
+   * @property {Array} legs - An array of route leg objects.
+   * @property {string} [voice_locale] - The locale used for voice instructions. Defaults to en (English). Requires steps=true.
+   * @property {Array<string>} [linear_references] - An array of base64-encoded OpenLR location references, one for each graph edge of the road network matched by the input trace. This key is optional, and present only when linear_references=true in the request.
+   */
+
+  /**
+   * A tracepoint object is a waypoint object with three additional fields: matchings_index, waypoint_index, and alternatives_count.
+   *
+   * @typedef {Object} TracepointObject
+   * @property {number} matchings_index - The index of the match object in matchings that the sub-trace was matched to.
+   * @property {number} waypoint_index - The index of the waypoint inside the matched route.
+   * @property {number} alternatives_count - The number of probable alternative matchings for this trace point. A value of 0 indicates that this point was matched unambiguously. Split the trace at these points for incremental map matching.
+   * @property {string} name - The name of the road or path the coordinate snapped to.
+   * @property {Coordinates} location - An array that contains the location of the snapped coordinate, in the format [longitude, latitude].
    */
   config.points.forEach(function(obj) {
     path.coordinates.push(obj.coordinates[0] + ',' + obj.coordinates[1]);
@@ -182,12 +237,19 @@ MapMatching.getMatch = function(config) {
       language: config.language,
       overview: config.overview,
       steps: config.steps,
+      banner_instructions: config.banner_instructions,
+      roundabout_exits: config.roundabout_exits,
+      voice_instructions: config.voice_instructions,
+      voice_units: config.voice_units,
       tidy: config.tidy,
+      linear_references: config.linear_references,
       approaches: path.approach,
       radiuses: path.radius,
       waypoints: path.isWaypoint,
       timestamps: path.timestamp,
       waypoint_names: path.waypointName,
+      ignore: config.ignore,
+      depart_at: config.depart_at,
       coordinates: path.coordinates
     })
   );
